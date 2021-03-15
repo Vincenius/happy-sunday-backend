@@ -8,13 +8,9 @@ const server = express()
 const fileEncoding = 'utf-8'
 const tournamentDirectory = './tournamentFiles'
 
-server.use(cors())
-server.use(bodyParser.urlencoded({ extended: true }));
-server.use(bodyParser.json());
-
-server.get('/', async (req, res) => {
+const fetchStreamJson = url => new Promise(async (resolve, reject) => {
   let stringResult = ''
-  const readableStream = await fetch('https://lichess.org/api/user/figurlix/tournament/created')
+  const readableStream = await fetch(url)
     .then(response => response.body)
 
   readableStream.on('readable', () => {
@@ -28,39 +24,49 @@ server.get('/', async (req, res) => {
     const stringArray = stringResult.split( '\n'); // split by new line
     stringArray.pop(); // remove last element
     const jsonResult = stringArray.map(a => JSON.parse(a)); // parse json
-    const tournamentIds = jsonResult.map(t => t.id)
 
-    for (id of tournamentIds) {
-      const path = `${tournamentDirectory}/${id}.json`
+    resolve(jsonResult)
+  })
+})
 
-      // Write to file if not exists
-      if (!fs.existsSync(path)) {
-        const tournamentDetails = await fetch('https://lichess.org/api/tournament/' + id).then(resp => resp.json())
-        // TODO also fetch performance
-        // const tournamentResults = await fetch('https://lichess.org/api/tournament/' + id + '/results').then(resp => resp.json())
-        const tournamentDetailsString = JSON.stringify({
-          ...tournamentDetails,
-          // results: tournamentResults
-        });
-        fs.writeFileSync(path, tournamentDetailsString, fileEncoding);
-      }
+server.use(cors())
+server.use(bodyParser.urlencoded({ extended: true }));
+server.use(bodyParser.json());
+
+server.get('/', async (req, res) => {
+  let stringResult = ''
+  const jsonResult = await fetchStreamJson('https://lichess.org/api/user/figurlix/tournament/created')
+  const tournamentIds = jsonResult.map(t => t.id)
+
+  for (id of tournamentIds) {
+    const path = `${tournamentDirectory}/${id}.json`
+
+    // Write to file if not exists
+    if (!fs.existsSync(path)) {
+      const tournamentDetails = await fetch('https://lichess.org/api/tournament/' + id).then(resp => resp.json())
+      const tournamentResults = await fetchStreamJson('https://lichess.org/api/tournament/' + id + '/results')
+      const tournamentDetailsString = JSON.stringify({
+        ...tournamentDetails,
+        results: tournamentResults
+      });
+      fs.writeFileSync(path, tournamentDetailsString, fileEncoding);
     }
+  }
 
-    const files = fs.readdirSync(tournamentDirectory);
-    for (file of files) {
-      const filePath = `${tournamentDirectory}/${file}`
-      const fileContent = fs.readFileSync(filePath, fileEncoding)
-      const fileJson = JSON.parse(fileContent);
+  const files = fs.readdirSync(tournamentDirectory);
+  for (file of files) {
+    const filePath = `${tournamentDirectory}/${file}`
+    const fileContent = fs.readFileSync(filePath, fileEncoding)
+    const fileJson = JSON.parse(fileContent);
 
-      const elemIndex = jsonResult.findIndex(j => j.id === fileJson.id)
-      jsonResult[elemIndex] = {
-        ...jsonResult[elemIndex],
-        ...fileJson,
-      }
+    const elemIndex = jsonResult.findIndex(j => j.id === fileJson.id)
+    jsonResult[elemIndex] = {
+      ...jsonResult[elemIndex],
+      ...fileJson,
     }
+  }
 
-    res.send(jsonResult)
-  });
+  res.send(jsonResult)
 })
 
 server.listen(3006, (err) => {
