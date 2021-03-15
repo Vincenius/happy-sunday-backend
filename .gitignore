@@ -1,2 +1,3 @@
 node_modules
 tournamentFiles/*
+.DS_Store

@@ -54,19 +54,16 @@ server.get('/', async (req, res) => {
   }
 
   const files = fs.readdirSync(tournamentDirectory);
+  const response = []
   for (file of files) {
     const filePath = `${tournamentDirectory}/${file}`
     const fileContent = fs.readFileSync(filePath, fileEncoding)
     const fileJson = JSON.parse(fileContent);
 
-    const elemIndex = jsonResult.findIndex(j => j.id === fileJson.id)
-    jsonResult[elemIndex] = {
-      ...jsonResult[elemIndex],
-      ...fileJson,
-    }
+    response.push(fileJson)
   }
 
-  res.send(jsonResult)
+  res.send(response)
 })
 
 server.listen(3006, (err) => {
