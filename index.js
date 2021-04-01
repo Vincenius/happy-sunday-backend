@@ -6,7 +6,51 @@ const fetch = require('node-fetch')
 
 const server = express()
 const fileEncoding = 'utf-8'
-const tournamentDirectory = './tournamentFiles'
+const tournamentDirectory = './files/tournamentFiles'
+const playerDirectory = './files/playerFiles'
+
+const sleep = ms => {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+const getResult = score => {
+  if (
+    score === 2 ||
+    (typeof score === "object" && score[0] === 2 && score[1] === 2) ||
+    (typeof score === "object" && score[0] === 4 && score[1] === 3) ||
+    (typeof score === "object" && score[0] === 5 && score[1] === 3)
+  ) {
+    return 'win'
+  } else if (score === 1 ||
+    (typeof score === "object" && score[0] === 1 && score[1] === 2) ||
+    (typeof score === "object" && score[0] === 2 && score[1] === 3)
+  ) {
+    return 'draw'
+  } else {
+    return 'loss'
+  }
+}
+
+const generateMatchData = (data, matchData = {}) => {
+  for (let elem of data) {
+    const { score, op } = elem
+    const result = getResult(score)
+
+    if (matchData[op.name]) { // exists
+      matchData[op.name][result] = matchData[op.name][result] + 1
+    } else { // does not exist
+      matchData[op.name] = {
+        win: result === 'win' ? 1 : 0,
+        draw: result === 'draw' ? 1 : 0,
+        loss: result === 'loss' ? 1 : 0
+      }
+    }
+  }
+
+  return matchData
+}
 
 const fetchStreamJson = url => new Promise(async (resolve, reject) => {
   let stringResult = ''
@@ -34,7 +78,6 @@ server.use(bodyParser.urlencoded({ extended: true }));
 server.use(bodyParser.json());
 
 server.get('/', async (req, res) => {
-  let stringResult = ''
   const jsonResult = await fetchStreamJson('https://lichess.org/api/user/figurlix/tournament/created')
   const tournamentIds = jsonResult.map(t => t.id)
 
@@ -43,13 +86,32 @@ server.get('/', async (req, res) => {
 
     // Write to file if not exists
     if (!fs.existsSync(path)) {
-      const tournamentDetails = await fetch('https://lichess.org/api/tournament/' + id).then(resp => resp.json())
-      const tournamentResults = await fetchStreamJson('https://lichess.org/api/tournament/' + id + '/results')
-      const tournamentDetailsString = JSON.stringify({
-        ...tournamentDetails,
-        results: tournamentResults
-      });
-      fs.writeFileSync(path, tournamentDetailsString, fileEncoding);
+      let page = 1
+      let uri = `https://lichess.org/api/tournament/${id}?page=${page}`
+      const tournamentDetails = await fetch(uri).then(resp => resp.json())
+
+      if (tournamentDetails.isFinished) {
+        const pages = Math.ceil(tournamentDetails.nbPlayers / 10)
+        fetch(`https://lichess.vincenius.com/generate/${id}`)
+
+        // fetch additional pages of players
+        while (page < pages) {
+          page++
+          uri = `https://lichess.org/api/tournament/${id}?page=${page}`
+          const additionalDetails = await fetch(uri).then(resp => resp.json())
+          tournamentDetails.standing.players = [
+            ...tournamentDetails.standing.players,
+            ...additionalDetails.standing.players
+          ]
+        }
+        // nbPlayers
+        const tournamentResults = await fetchStreamJson('https://lichess.org/api/tournament/' + id + '/results')
+        const tournamentDetailsString = JSON.stringify({
+          ...tournamentDetails,
+          results: tournamentResults
+        });
+        fs.writeFileSync(path, tournamentDetailsString, fileEncoding);
+      }
     }
   }
 
@@ -58,12 +120,82 @@ server.get('/', async (req, res) => {
   for (file of files) {
     const filePath = `${tournamentDirectory}/${file}`
     const fileContent = fs.readFileSync(filePath, fileEncoding)
-    const fileJson = JSON.parse(fileContent);
+    const fileJson = JSON.parse(fileContent)
 
     response.push(fileJson)
   }
 
   res.send(response)
+})
+
+// server.get('/generateAll', async (req, res) => {
+//   const files = fs.readdirSync(tournamentDirectory)
+
+//   for (file of files) {
+//     const tournamentId = file.replace('.json','')
+//     await fetch(`http://localhost:3006/generate/${tournamentId}`)
+//   }
+
+//   res.send({ done: true })
+// })
+
+server.get('/generate/:tournamentId', async (req, res) => {
+  const tournamentId = req.params.tournamentId
+
+  const filePath = `${tournamentDirectory}/${tournamentId}.json`
+  const fileContent = fs.readFileSync(filePath, fileEncoding)
+  const fileJson = JSON.parse(fileContent)
+
+  const players = fileJson.results.map(r => r.username)
+
+  for (let player of players) {
+    console.log('generate', tournamentId, player)
+    const playerPath = `${playerDirectory}/${player}.json`
+
+    const playerData = fs.existsSync(playerPath)
+      ? JSON.parse(fs.readFileSync(playerPath, fileEncoding)) // read from file
+      : { // init empty
+        berserk: [],
+        score: [],
+        games: [],
+        performance: [],
+        rank: [],
+        blackWins: [],
+        whiteWins: [],
+        matches: {},
+      }
+
+    const uri = `https://lichess.org/tournament/${tournamentId}/player/${player}`
+    const data = await fetch(uri).then(resp => resp.json())
+
+    playerData.berserk.push(data.player.nb.berserk || 0)
+    playerData.score.push(data.player.score)
+    playerData.games.push(data.player.nb.game)
+    playerData.performance.push(data.player.performance)
+    playerData.rank.push(data.player.rank)
+    playerData.blackWins.push(
+      data.pairings.reduce((acc, curr) => acc + (curr.color === 'black' && curr.win ? 1 : 0), 0)
+    )
+    playerData.whiteWins.push(
+      data.pairings.reduce((acc, curr) => acc + (curr.color === 'white' && curr.win ? 1 : 0), 0)
+    )
+    playerData.matches = generateMatchData(data.pairings, playerData.matches)
+
+    fs.writeFileSync(playerPath, JSON.stringify(playerData), fileEncoding);
+
+    await sleep(20000) // wait to prevent rate limit
+  }
+
+  res.send({ done: true })
+})
+
+server.get('/player/:name', async (req, res) => {
+  const player = req.params.name
+  const filePath = `${playerDirectory}/${player}.json`
+  const fileContent = fs.readFileSync(filePath, fileEncoding)
+  const fileJson = JSON.parse(fileContent)
+
+  res.send(fileJson)
 })
 
 server.listen(3006, (err) => {
