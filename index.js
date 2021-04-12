@@ -81,7 +81,7 @@ server.use(bodyParser.json());
 
 server.get('/', async (req, res) => {
   const jsonResult = await fetchStreamJson('https://lichess.org/api/user/figurlix/tournament/created')
-  const tournamentIds = jsonResult.map(t => t.id)
+  const tournamentIds = jsonResult.map(t => t.id).filter(id => id !== 'bHgniq4z') // filter first test tournament
 
   for (id of tournamentIds) {
     const path = `${tournamentDirectory}/${id}.json`
@@ -93,6 +93,7 @@ server.get('/', async (req, res) => {
       const tournamentDetails = await fetch(uri).then(resp => resp.json())
 
       if (tournamentDetails.isFinished) {
+        console.log('Fetching new tournament', id)
         const pages = Math.ceil(tournamentDetails.nbPlayers / 10)
 
         // fetch additional pages of players
@@ -133,13 +134,28 @@ server.get('/', async (req, res) => {
 
 // server.get('/generateAll', async (req, res) => {
 //   const files = fs.readdirSync(tournamentDirectory)
+//   const fileJsons = []
+
 
 //   for (file of files) {
-//     const tournamentId = file.replace('.json','')
-//     await fetch(`http://localhost:3006/generate/${tournamentId}`)
+//     const filePath = `${tournamentDirectory}/${file}`
+//     const fileContent = fs.readFileSync(filePath, fileEncoding)
+//     const fileJson = JSON.parse(fileContent)
+//     fileJsons.push(fileJson)
+//     // const tournamentId = file.replace('.json','')
+//     // await fetch(`http://localhost:3006/generate/${tournamentId}`)
 //   }
 
-//   console.log('DONE')
+//   const sortedIds = fileJsons
+//     .sort((a,b) => new Date(a.startsAt) - new Date(b.startsAt))
+//     .map(t => t.id)
+
+
+//   for (id of sortedIds) {
+//     await fetch(`http://localhost:3006/generate/${id}`)
+//   }
+
+//   console.log('DONE', sortedIds)
 
 //   res.send({ done: true })
 // })
@@ -213,49 +229,54 @@ server.get('/generate/:tournamentId', async (req, res) => {
   const players = fileJson.results.map(r => r.username)
 
   for (let player of players) {
-    console.log('generate', tournamentId, player)
-    const playerPath = `${playerDirectory}/${player}.json`
-
-    const playerData = fs.existsSync(playerPath)
-      ? JSON.parse(fs.readFileSync(playerPath, fileEncoding)) // read from file
-      : { // init empty
-        berserk: [],
-        score: [],
-        games: [],
-        performance: [],
-        rank: [],
-        blackWins: [],
-        whiteWins: [],
-        matches: {},
-        blackGames: [],
-        whiteGames: [],
-        draws: []
-      }
-
     const uri = `https://lichess.org/tournament/${tournamentId}/player/${player}`
     const data = await fetch(uri).then(resp => resp.json())
 
-    const blackGames = data.pairings.reduce((acc, curr) => acc + (curr.color === 'black' ? 1 : 0), 0)
-    const whiteGames = data.pairings.reduce((acc, curr) => acc + (curr.color === 'black' ? 1 : 0), 0)
-    const draws = data.pairings.reduce((acc, curr) => getResult(curr.score) === 'draw' ? acc + 1 : acc, 0)
+    if (data.player.nb.game > 0) {
+      console.log('generate', tournamentId, player)
+      const playerPath = `${playerDirectory}/${player}.json`
 
-    playerData.berserk.push(data.player.nb.berserk || 0)
-    playerData.score.push(data.player.score)
-    playerData.games.push(data.player.nb.game)
-    playerData.performance.push(data.player.performance)
-    playerData.rank.push(data.player.rank)
-    playerData.blackWins.push(
-      data.pairings.reduce((acc, curr) => acc + (curr.color === 'black' && curr.win ? 1 : 0), 0)
-    )
-    playerData.whiteWins.push(
-      data.pairings.reduce((acc, curr) => acc + (curr.color === 'white' && curr.win ? 1 : 0), 0)
-    )
-    playerData.matches = generateMatchData(data.pairings, playerData.matches)
-    playerData.blackGames.push(blackGames)
-    playerData.whiteGames.push(whiteGames)
-    playerData.draws.push(draws)
+      const playerData = fs.existsSync(playerPath)
+        ? JSON.parse(fs.readFileSync(playerPath, fileEncoding)) // read from file
+        : { // init empty
+          berserk: [],
+          score: [],
+          games: [],
+          performance: [],
+          rank: [],
+          blackWins: [],
+          whiteWins: [],
+          matches: {},
+          blackGames: [],
+          whiteGames: [],
+          draws: []
+        }
 
-    fs.writeFileSync(playerPath, JSON.stringify(playerData), fileEncoding);
+
+      const blackGames = data.pairings.reduce((acc, curr) => acc + (curr.color === 'black' ? 1 : 0), 0)
+      const whiteGames = data.pairings.reduce((acc, curr) => acc + (curr.color === 'white' ? 1 : 0), 0)
+      const draws = data.pairings.reduce((acc, curr) => getResult(curr.score) === 'draw' ? acc + 1 : acc, 0)
+
+      playerData.berserk.push(data.player.nb.berserk || 0)
+      playerData.score.push(data.player.score)
+      playerData.games.push(data.player.nb.game)
+      playerData.performance.push(data.player.performance)
+      playerData.rank.push(data.player.rank)
+      playerData.blackWins.push(
+        data.pairings.reduce((acc, curr) => acc + (curr.color === 'black' && curr.win ? 1 : 0), 0)
+      )
+      playerData.whiteWins.push(
+        data.pairings.reduce((acc, curr) => acc + (curr.color === 'white' && curr.win ? 1 : 0), 0)
+      )
+      playerData.matches = generateMatchData(data.pairings, playerData.matches)
+      playerData.blackGames.push(blackGames)
+      playerData.whiteGames.push(whiteGames)
+      playerData.draws.push(draws)
+
+      fs.writeFileSync(playerPath, JSON.stringify(playerData), fileEncoding);
+    } else {
+      console.log('skip', tournamentId, player)
+    }
 
     await sleep(20000) // wait to prevent rate limit
   }
