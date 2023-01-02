@@ -176,11 +176,10 @@ server.get('/generate/:tournamentId', async (req, res) => {
   for (let player of players) {
     const playerPathMeta = `${playerMetaDirectory}/${tournamentId}-${player}.json`
 
-    if (fs.existsSync(playerPathMeta)) {
+    if (!fs.existsSync(playerPathMeta)) {
       try {
-        // const uri = `https://lichess.org/tournament/${tournamentId}/player/${player}`
-        // const data = await fetch(uri).then(resp => resp.json())
-        const data = JSON.parse(fs.readFileSync(playerPathMeta, fileEncoding))
+        const uri = `https://lichess.org/tournament/${tournamentId}/player/${player}`
+        const data = await fetch(uri).then(resp => resp.json())
 
         if (data.player.nb.game > 0) {
           console.log('generate', tournamentId, player)
@@ -223,12 +222,12 @@ server.get('/generate/:tournamentId', async (req, res) => {
 
           fs.writeFileSync(playerPathMeta, JSON.stringify(data), fileEncoding)
           fs.writeFileSync(playerPath, JSON.stringify(playerData), fileEncoding);
-          // await sleep(10000) // wait to prevent rate limit
         } else {
           console.log('skip', tournamentId, player)
         }
+        await sleep(10000) // wait to prevent rate limit
       } catch (e) {
-        console.log('FAILED', playerPathMeta, e)
+        console.log('FAILED', playerPathMeta)
       }
     } else {
       console.log('ALREADY DONE, SKIP:', playerPathMeta)
