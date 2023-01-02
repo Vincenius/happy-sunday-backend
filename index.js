@@ -18,15 +18,17 @@ const sleep = ms => {
 
 const getResult = score => {
   if (
-    score === 2 ||
-    score === 3 ||
+    score === '2' || score === 2 ||
+    score === '3' || score === 3 ||
+    score === '4' || score === 4 ||
+    score === '5' || score === 5 ||
     (typeof score === "object" && score[0] === 2 && score[1] === 2) ||
     (typeof score === "object" && score[0] === 3 && score[1] === 2) ||
     (typeof score === "object" && score[0] === 4 && score[1] === 3) ||
     (typeof score === "object" && score[0] === 5 && score[1] === 3)
   ) {
     return 'win'
-  } else if (score === 1 ||
+  } else if (score === '1' || score === 1 ||
     (typeof score === "object" && score[0] === 1 && score[1] === 2) ||
     (typeof score === "object" && score[0] === 2 && score[1] === 3)
   ) {
@@ -174,10 +176,11 @@ server.get('/generate/:tournamentId', async (req, res) => {
   for (let player of players) {
     const playerPathMeta = `${playerMetaDirectory}/${tournamentId}-${player}.json`
 
-    if (!fs.existsSync(playerPathMeta)) {
+    if (fs.existsSync(playerPathMeta)) {
       try {
-        const uri = `https://lichess.org/tournament/${tournamentId}/player/${player}`
-        const data = await fetch(uri).then(resp => resp.json())
+        // const uri = `https://lichess.org/tournament/${tournamentId}/player/${player}`
+        // const data = await fetch(uri).then(resp => resp.json())
+        const data = JSON.parse(fs.readFileSync(playerPathMeta, fileEncoding))
 
         if (data.player.nb.game > 0) {
           console.log('generate', tournamentId, player)
@@ -220,12 +223,12 @@ server.get('/generate/:tournamentId', async (req, res) => {
 
           fs.writeFileSync(playerPathMeta, JSON.stringify(data), fileEncoding)
           fs.writeFileSync(playerPath, JSON.stringify(playerData), fileEncoding);
+          // await sleep(10000) // wait to prevent rate limit
         } else {
           console.log('skip', tournamentId, player)
         }
-        await sleep(10000) // wait to prevent rate limit
       } catch (e) {
-        console.log('FAILED', playerPathMeta)
+        console.log('FAILED', playerPathMeta, e)
       }
     } else {
       console.log('ALREADY DONE, SKIP:', playerPathMeta)
@@ -236,8 +239,8 @@ server.get('/generate/:tournamentId', async (req, res) => {
 })
 
 server.get('/player/:name', async (req, res) => {
-  const player = req.params.name
-  const filePath = `${playerDirectory}/${player}.json`
+  const player = req.params.name || ''
+  const filePath = `${playerDirectory}/${player.toLowerCase()}.json`
   const fileContent = fs.readFileSync(filePath, fileEncoding)
   const fileJson = JSON.parse(fileContent)
 
